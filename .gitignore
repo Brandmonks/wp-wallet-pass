@@ -1,23 +1,33 @@
-# ignore everything in the root except the "wp-content" directory.
-!wp-content/
+# OS junk
+.DS_Store
+Thumbs.db
 
-# ignore everything in the "wp-content" directory, except:
-# "mu-plugins", "plugins", "themes" directory
-wp-content/*
-!wp-content/mu-plugins/
-!wp-content/plugins/
-!wp-content/themes/
+# IDE
+.idea/
+.vscode/
+*.iml
 
-# ignore these plugins
-wp-content/plugins/hello.php
+# PHP dependencies
+/vendor/
 
-# ignore specific themes
-wp-content/themes/twenty*/
+# Environment files
+.env
+.env.*
 
-# ignore node dependency directories
-node_modules/
+# Build artifacts
+*.zip
+*.pkpass
 
-# ignore log files and databases
-*.log
-*.sql
-*.sqlite
+# Secrets and certificates (do not commit)
+*.p12
+*.pfx
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+google-sa.json
+wallet-keys/
+
+# WordPress
+wp-content/uploads/

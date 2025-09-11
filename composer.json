@@ -1,0 +1,14 @@
+{
+  "name": "vendor_name/wp-wallet-pass",
+  "description": "Add to Apple Wallet (.pkpass) and Google Wallet (JWT link) for member profiles.",
+  "type": "wordpress-plugin",
+  "require": {
+    "pkpass/pkpass": "^2.0.0",
+    "firebase/php-jwt": "^6.10"
+  },
+  "autoload": {
+    "psr-4": {
+      "MWP\\": "inc/"
+    }
+  }
+}
