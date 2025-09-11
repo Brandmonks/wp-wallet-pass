@@ -19,6 +19,7 @@ if ( file_exists( $autoload ) ) {
 }
 
 use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 
 class MWP_Plugin {
 	const OPT_KEY = 'mwp_options';
@@ -177,26 +178,63 @@ class MWP_Plugin {
 	public function handle_template_redirect() {
 		$action  = get_query_var( 'mwp_action' );
 		$user_id = absint( get_query_var( 'mwp_user' ) );
-		if ( ! $action || ! $user_id ) {
+		if ( ! $action ) {
 			return;
 		}
 
-		// Nonce check
-		$nonce = isset( $_GET['mwp_nonce'] ) ? sanitize_text_field( $_GET['mwp_nonce'] ) : '';
-		if ( ! wp_verify_nonce( $nonce, 'mwp_' . $user_id ) ) {
-			status_header( 403 );
-			wp_die( 'Invalid nonce' );
-		}
+		// For apple/google creation, require user + nonce. For verify, use token.
+		if ( in_array( $action, [ 'apple', 'google' ], true ) ) {
+			if ( ! $user_id ) {
+				return;
+			}
+			$nonce = isset( $_GET['mwp_nonce'] ) ? sanitize_text_field( $_GET['mwp_nonce'] ) : '';
+			if ( ! wp_verify_nonce( $nonce, 'mwp_' . $user_id ) ) {
+				status_header( 403 );
+				wp_die( 'Invalid nonce' );
+			}
+			$user = get_user_by( 'id', $user_id );
+			if ( ! $user ) {
+				status_header( 404 );
+				wp_die( 'User not found' );
+			}
+			$member_name = apply_filters( 'mwp_member_name', $user->display_name, $user );
+			$member_id   = apply_filters( 'mwp_member_id', (string) $user->user_login, $user );
+		} elseif ( $action === 'verify' ) {
+			$token = isset( $_GET['mwp_token'] ) ? sanitize_text_field( wp_unslash( $_GET['mwp_token'] ) ) : '';
+			if ( empty( $token ) || ! class_exists( '\\Firebase\\JWT\\JWT' ) ) {
+				status_header( 400 );
+				wp_die( 'Invalid or missing token' );
+			}
+			try {
+				$payload = JWT::decode( $token, new Key( wp_salt( 'auth' ), 'HS256' ) );
+				$user_id     = isset( $payload->uid ) ? absint( $payload->uid ) : 0;
+				$member_id   = isset( $payload->mid ) ? sanitize_text_field( $payload->mid ) : '';
+				$user        = $user_id ? get_user_by( 'id', $user_id ) : false;
+				$member_name = $user ? apply_filters( 'mwp_member_name', $user->display_name, $user ) : '';
+			} catch ( \Throwable $e ) {
+				status_header( 403 );
+				wp_die( 'Invalid token' );
+			}
 
-		$user = get_user_by( 'id', $user_id );
-		if ( ! $user ) {
-			status_header( 404 );
-			wp_die( 'User not found' );
-		}
+			if ( ! $user ) {
+				status_header( 404 );
+				wp_die( 'User not found' );
+			}
 
-		// Resolve dynamic fields (filterable)
-		$member_name = apply_filters( 'mwp_member_name', $user->display_name, $user );
-		$member_id   = apply_filters( 'mwp_member_id', (string) $user->user_login, $user ); // default: username
+			// Render a minimal verification view
+			nocache_headers();
+			header( 'Content-Type: text/html; charset=utf-8' );
+			echo '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1" />';
+			echo '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial; padding:20px; max-width:480px; margin:auto">';
+			echo '<h2>Member Verification</h2>';
+			echo '<p><strong>Name:</strong> ' . esc_html( $member_name ) . '</p>';
+			echo '<p><strong>Member ID:</strong> ' . esc_html( $member_id ) . '</p>';
+			echo '<p>Status: Active</p>';
+			echo '</div>';
+			exit;
+		} else {
+			return;
+		}
 
 		if ( $action === 'apple' ) {
 			$this->serve_apple_pkpass( $member_name, $member_id, $user_id );
@@ -289,6 +327,17 @@ class MWP_Plugin {
 
 		$serial = 'user-' . $user_id . '-' . time();
 
+		// Build a signed verification URL for QR scanning
+		$token = '';
+		try {
+			$token = class_exists( '\\Firebase\\JWT\\JWT' ) ? JWT::encode( [ 'uid' => $user_id, 'mid' => $member_id, 'iat' => time(), 'exp' => time() + YEAR_IN_SECONDS ], wp_salt( 'auth' ), 'HS256' ) : '';
+		} catch ( \Throwable $e ) {
+			$token = '';
+		}
+		$verify_url = add_query_arg( [ 'mwp_action' => 'verify', 'mwp_token' => $token ], home_url( '/' ) );
+
+		$qr_message = apply_filters( 'mwp_barcode_message', $verify_url, $user_id, $member_id );
+
 		$passJson = [
 			'formatVersion'      => 1,
 			'passTypeIdentifier' => $opts['pass_type_id'],
@@ -303,10 +352,13 @@ class MWP_Plugin {
 				'primaryFields'   => [ [ 'key' => 'name', 'label' => 'Name', 'value' => $member_name ] ],
 				'auxiliaryFields' => [ [ 'key' => 'memberId', 'label' => 'Member ID', 'value' => $member_id ] ]
 			],
-			'barcode'            => [
-				'format'          => 'PKBarcodeFormatQR',
-				'message'         => 'MEMBER:' . $member_id,
-				'messageEncoding' => 'iso-8859-1'
+			'barcodes'          => [
+				[
+					'format'          => 'PKBarcodeFormatQR',
+					'message'         => $qr_message,
+					'messageEncoding' => 'iso-8859-1',
+					'altText'         => 'Member ID: ' . $member_id
+				]
 			]
 		];
 
@@ -314,15 +366,16 @@ class MWP_Plugin {
 		try {
 			$pkpass = new PKPass\PKPass( $opts['p12_path'], $opts['p12_password'] );
 			if ( ! empty( $opts['wwdr_pem'] ) ) {
-				$pkpass->setWWDRcertPath( $opts['wwdr_pem'] );
+				$pkpass->setWwdrCertificatePath( $opts['wwdr_pem'] );
 			}
-			$pkpass->setJSON( json_encode( $passJson, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
+			$pkpass->setData( $passJson );
 			// Add required images (fallback to placeholder icon if missing)
 			$base      = plugin_dir_path( __FILE__ ) . 'assets/';
 			$icon_path = file_exists( $base . 'icon.png' ) ? ( $base . 'icon.png' ) : $this->mwp_placeholder_icon();
-			$pkpass->addAsset( $icon_path );
+			// Ensure correct filename inside bundle
+			$pkpass->addFile( $icon_path, 'icon.png' );
 			if ( file_exists( $base . 'logo.png' ) ) {
-				$pkpass->addAsset( $base . 'logo.png' );
+				$pkpass->addFile( $base . 'logo.png', 'logo.png' );
 			}
 
 			$blob = $pkpass->create();
