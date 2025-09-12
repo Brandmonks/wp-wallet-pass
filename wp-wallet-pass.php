@@ -560,7 +560,8 @@ class MWP_Plugin {
 						'id'              => $objectId,
 						'classId'         => $classId,
 						'state'           => 'ACTIVE',
-						'header'          => [ 'defaultValue' => [ 'language' => 'en-US', 'value' => 'Member Card' ] ],
+						'header'          => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => 'Mitgliedsausweis' ] ],
+						'cardTitle'       => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => 'Mitgliedsausweis' ] ],
 						'subheader'       => [ 'defaultValue' => [ 'language' => 'en-US', 'value' => $member_name ] ],
 						'textModulesData' => [
 							[
