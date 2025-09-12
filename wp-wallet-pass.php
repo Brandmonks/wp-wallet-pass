@@ -55,17 +55,17 @@ class MWP_Plugin {
 	}
 
 	// === Activation ===
-	public static function activate() {
+	public static function activate(): void {
 		( new self() )->register_query_vars_and_rewrites();
 		flush_rewrite_rules();
 	}
 
-	public static function deactivate() {
+	public static function deactivate(): void {
 		flush_rewrite_rules();
 	}
 
 	// === Settings ===
-	public function add_settings_page() {
+	public function add_settings_page(): void {
 		add_options_page(
 			'WP Wallet Pass',
 			'WP Wallet Pass',
@@ -75,7 +75,7 @@ class MWP_Plugin {
 		);
 	}
 
-	public function register_settings() {
+	public function register_settings(): void {
 		register_setting( self::OPT_KEY, self::OPT_KEY, [
 			'type'              => 'array',
 			'sanitize_callback' => [ $this, 'sanitize_options' ]
@@ -142,7 +142,7 @@ class MWP_Plugin {
 		] );
 	}
 
-	public function sanitize_options( $opts ) {
+	public function sanitize_options( $opts ): array {
 		$safe = [];
 		$keys = [
 			'team_id',
@@ -156,7 +156,7 @@ class MWP_Plugin {
 			'issuer_id',
 			'class_id',
 			'sa_json_attachment_id',
-			
+
 		];
 		foreach ( $keys as $k ) {
 			$safe[ $k ] = isset( $opts[ $k ] ) ? sanitize_text_field( $opts[ $k ] ) : '';
@@ -165,7 +165,7 @@ class MWP_Plugin {
 		return $safe;
 	}
 
-	public function field_text( $args ) {
+	public function field_text( $args ): void {
 		$opts = get_option( self::OPT_KEY, [] );
 		$key  = esc_attr( $args['key'] );
 		$val  = isset( $opts[ $key ] ) ? esc_attr( $opts[ $key ] ) : '';
@@ -173,14 +173,14 @@ class MWP_Plugin {
 		echo "<input type='text' name='" . self::OPT_KEY . "[$key]' value='$val' class='regular-text' placeholder='$ph' />";
 	}
 
-	public function field_password( $args ) {
+	public function field_password( $args ): void {
 		$opts = get_option( self::OPT_KEY, [] );
 		$key  = esc_attr( $args['key'] );
 		$val  = isset( $opts[ $key ] ) ? esc_attr( $opts[ $key ] ) : '';
 		echo "<input type='password' name='" . self::OPT_KEY . "[$key]' value='$val' class='regular-text' />";
 	}
 
-	public function field_media( $args ) {
+	public function field_media( $args ): void {
 		$opts = get_option( self::OPT_KEY, [] );
 		$key  = esc_attr( $args['key'] );
 		$val  = isset( $opts[ $key ] ) ? esc_attr( $opts[ $key ] ) : '';
@@ -189,8 +189,8 @@ class MWP_Plugin {
 			$preview = '<img src="' . esc_url( $url ) . '" style="max-width:140px; max-height:70px; display:block; margin-top:8px; border:1px solid #ccd0d4; background:#fff; padding:4px;" />';
 		}
 		wp_enqueue_media();
-		echo "<input type='number' id='mwp_{$key}' name='" . self::OPT_KEY . "[$key]' value='$val' class='small-text' /> ";
-		echo "<button type='button' class='button' id='mwp_select_{$key}'>Select Image</button>";
+		echo "<input type='number' id='mwp_$key' name='" . self::OPT_KEY . "[$key]' value='$val' class='small-text' /> ";
+		echo "<button type='button' class='button' id='mwp_select_$key'>Select Image</button>";
 		echo $preview;
 		?>
 		<script>
@@ -211,16 +211,16 @@ class MWP_Plugin {
 		<?php
 	}
 
-	public function field_file( $args ) {
+	public function field_file( $args ): void {
 		$opts  = get_option( self::OPT_KEY, [] );
 		$key   = esc_attr( $args['key'] );
 		$val   = isset( $opts[ $key ] ) ? esc_attr( $opts[ $key ] ) : '';
 		$help  = isset( $args['help'] ) ? esc_html( $args['help'] ) : '';
 		$label = $val ? basename( (string) wp_get_attachment_url( (int) $val ) ) : 'No file selected';
 		wp_enqueue_media();
-		echo "<input type='number' id='mwp_{$key}' name='" . self::OPT_KEY . "[$key]' value='$val' class='small-text' /> ";
-		echo "<button type='button' class='button' id='mwp_select_{$key}'>Select File</button> ";
-		echo "<span id='mwp_label_{$key}' style='margin-left:8px;opacity:.8;'>" . esc_html( $label ) . "</span>";
+		echo "<input type='number' id='mwp_$key' name='" . self::OPT_KEY . "[$key]' value='$val' class='small-text' /> ";
+		echo "<button type='button' class='button' id='mwp_select_$key'>Select File</button> ";
+		echo "<span id='mwp_label_$key' style='margin-left:8px;opacity:.8;'>" . esc_html( $label ) . "</span>";
 		if ( $help ) {
 			echo '<p class="description">' . $help . '</p>';
 		}
@@ -245,7 +245,7 @@ class MWP_Plugin {
 		<?php
 	}
 
-	public function render_settings_page() {
+	public function render_settings_page(): void {
 		echo '<div class="wrap"><h1>WP Wallet Pass</h1><form method="post" action="options.php">';
 		settings_fields( self::OPT_KEY );
 		do_settings_sections( 'mwp-settings' );
@@ -256,7 +256,7 @@ class MWP_Plugin {
 	}
 
 	// === Query vars & rewrites ===
-	public function register_query_vars_and_rewrites() {
+	public function register_query_vars_and_rewrites(): void {
 		add_rewrite_rule( '^wallet/(apple|google)/([0-9]+)/?$', 'index.php?mwp_action=$matches[1]&mwp_user=$matches[2]', 'top' );
 		add_filter( 'query_vars', function ( $vars ) {
 			$vars[] = 'mwp_action';
@@ -267,7 +267,7 @@ class MWP_Plugin {
 		} );
 	}
 
-	public function handle_template_redirect() {
+	public function handle_template_redirect(): void {
 		$action  = get_query_var( 'mwp_action' );
 		$user_id = absint( get_query_var( 'mwp_user' ) );
 		if ( ! $action ) {
@@ -290,7 +290,7 @@ class MWP_Plugin {
 				wp_die( 'User not found' );
 			}
 			$member_name = apply_filters( 'mwp_member_name', $user->display_name, $user );
-			$member_id   = apply_filters( 'mwp_member_id', (string) $user->user_login, $user );
+			$member_id   = apply_filters( 'mwp_member_id', $user->user_login, $user );
 		} elseif ( $action === 'verify' ) {
 			$token = isset( $_GET['mwp_token'] ) ? sanitize_text_field( wp_unslash( $_GET['mwp_token'] ) ) : '';
 			if ( empty( $token ) || ! class_exists( '\\Firebase\\JWT\\JWT' ) ) {
@@ -337,7 +337,7 @@ class MWP_Plugin {
 	}
 
 	// === Shortcode ===
-	public function shortcode_buttons( $atts ) {
+	public function shortcode_buttons( $atts ): bool|string {
 		$a = shortcode_atts( [ 'user_id' => '' ], $atts, 'member_wallet_pass' );
 
 		$user_id = absint( $a['user_id'] );
@@ -403,7 +403,7 @@ class MWP_Plugin {
 	}
 
 	// === Apple Wallet ===
-	private function serve_apple_pkpass( string $member_name, string $member_id, int $user_id ) {
+	private function serve_apple_pkpass( string $member_name, string $member_id, int $user_id ): void {
 		// Generate and stream a .pkpass for the member
 		$opts = get_option( self::OPT_KEY, [] );
 		foreach ( [ 'team_id', 'pass_type_id', 'org_name', 'p12_password' ] as $req ) {
@@ -533,7 +533,7 @@ class MWP_Plugin {
 	}
 
 	// === Google Wallet ===
-	private function redirect_google_wallet( string $member_name, string $member_id, int $user_id ) {
+	private function redirect_google_wallet( string $member_name, string $member_id, int $user_id ): void {
 		$opts = get_option( self::OPT_KEY, [] );
 		if ( empty( $opts['issuer_id'] ) ) {
 			status_header( 500 );
@@ -645,7 +645,7 @@ class MWP_Plugin {
 				return $path;
 			}
 		}
-		$path = isset( $opts[ $path_key ] ) ? $opts[ $path_key ] : '';
+		$path = $opts[ $path_key ] ?? '';
 		if ( $path && file_exists( $path ) ) {
 			return $path;
 		}
@@ -736,7 +736,7 @@ class MWP_Plugin {
 		}
 	}
 
-	private function mwp_hex_to_color( $img, string $hex ) {
+	private function mwp_hex_to_color( $img, string $hex ): bool|int {
 		$hex = ltrim( $hex, '#' );
 		if ( strlen( $hex ) === 3 ) {
 			$hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2];
@@ -757,8 +757,3 @@ class MWP_Plugin {
 }
 
 new MWP_Plugin();
-
-// ==== Filter examples ====
-// Override how member name/ID are resolved from a WP_User object (e.g., pull from custom user meta)
-// add_filter('mwp_member_name', function($default, $user){ return get_user_meta($user->ID, 'first_name', true).' '.get_user_meta($user->ID,'last_name',true); }, 10, 2);
-// add_filter('mwp_member_id', function($default, $user){ return get_user_meta($user->ID, 'membership_number', true) ?: (string)$user->ID; }, 10, 2);
