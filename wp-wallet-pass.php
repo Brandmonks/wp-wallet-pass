@@ -106,6 +106,10 @@ class MWP_Plugin {
 			$this,
 			'field_media'
 		], 'mwp-settings', 'mwp_apple', [ 'key' => 'pass_logo_id' ] );
+		add_settings_field( 'pass_bg_id', 'Pass Background (media)', [
+			$this,
+			'field_media'
+		], 'mwp-settings', 'mwp_apple', [ 'key' => 'pass_bg_id' ] );
 		add_settings_field( 'p12_password', '.p12 Password', [
 			$this,
 			'field_password'
@@ -145,6 +149,7 @@ class MWP_Plugin {
 			'pass_type_id',
 			'org_name',
 			'pass_logo_id',
+			'pass_bg_id',
 			'p12_attachment_id',
 			'p12_password',
 			'wwdr_pem_attachment_id',
@@ -432,6 +437,17 @@ class MWP_Plugin {
 
 		$qr_message = apply_filters( 'mwp_barcode_message', $verify_url, $user_id, $member_id );
 
+        // Read user-meta based fields to mirror on-site card, with placeholders
+        $ph          = apply_filters( 'mwp_empty_placeholder', 'not set / available' );
+        $last_name   = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_NAME', true ) );
+        $first_name  = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_VORNAME', true ) );
+        $member_no   = sanitize_text_field( (string) ( get_user_meta( $user_id, 'ausweis_MITGLIEDSNUMMER', true ) ?: get_user_meta( $user_id, 'ausweis_MITGLIEDNR', true ) ) );
+        $valid_until = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_GUELTIG_BIS', true ) );
+        $last_name   = ( $last_name !== '' ) ? $last_name : $ph;
+        $first_name  = ( $first_name !== '' ) ? $first_name : $ph;
+        $member_no   = ( $member_no !== '' ) ? $member_no : $ph;
+        $valid_until = ( $valid_until !== '' ) ? $valid_until : $ph;
+
 		$passJson = [
 			'formatVersion'      => 1,
 			'passTypeIdentifier' => $opts['pass_type_id'],
@@ -444,10 +460,13 @@ class MWP_Plugin {
 			'labelColor'         => '#0D9DDB',
 			'generic'            => [
 				'primaryFields'   => [ [ 'key' => 'title', 'label' => '', 'value' => 'MITGLIEDSAUSWEIS' ] ],
-				'secondaryFields' => [ [ 'key' => 'name', 'label' => 'NAME/SURNAME/NOM/APELLIDO', 'value' => $member_name ] ],
+				'secondaryFields' => [
+					[ 'key' => 'lastname',  'label' => 'NAME/SURNAME/NOM/APELLIDO',              'value' => $last_name ],
+					[ 'key' => 'firstname', 'label' => 'VORNAMEN/GIVEN NAMES/PRÉNOMS/NOMBRES', 'value' => $first_name ]
+				],
 				'auxiliaryFields' => [
-					[ 'key' => 'given', 'label' => 'VORNAMEN/GIVEN NAMES/PRÉNOMS/NOMBRES', 'value' => $member_name ],
-					[ 'key' => 'memberId', 'label' => 'MITGLIEDSNUMMER', 'value' => $member_id ]
+					[ 'key' => 'memberId',  'label' => 'MITGLIEDSNUMMER', 'value' => $member_no ],
+					[ 'key' => 'validTill', 'label' => 'GÜLTIG BIS',      'value' => $valid_until ]
 				]
 			],
 			'barcodes'          => [
@@ -484,8 +503,14 @@ class MWP_Plugin {
 				$pkpass->addFile( $logo_path, 'logo.png' );
 			}
 
-			// Add generated background with top/bottom bars
-			$bg = $this->mwp_generate_background_image( 640, 400, 24, '#0D9DDB', '#F6F9FA' );
+			// Add background: prefer uploaded background, else generate gradient bars
+			$bg = '';
+			if ( ! empty( $opts['pass_bg_id'] ) ) {
+				$bg = $this->mwp_prepare_logo_path( (int) $opts['pass_bg_id'] ); // reuse converter to PNG
+			}
+			if ( ! $bg ) {
+				$bg = $this->mwp_generate_background_image( 640, 400, 24, '#0D9DDB', '#F6F9FA' );
+			}
 			if ( $bg ) {
 				$pkpass->addFile( $bg, 'background.png' );
 			}
@@ -532,7 +557,18 @@ class MWP_Plugin {
 
 		$issuerId = trim( $opts['issuer_id'] );
 		$classId  = ! empty( $opts['class_id'] ) ? trim( $opts['class_id'] ) : ( $issuerId . '.member_class' );
-		$objectId = $issuerId . '.user_' . $user_id; // must be globally unique per Google requirements
+        $objectId = $issuerId . '.user_' . $user_id; // must be globally unique per Google requirements
+
+        // Derive data to mirror the on-site card
+        $ph            = apply_filters( 'mwp_empty_placeholder', 'not set / available' );
+        $g_last_name   = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_NAME', true ) );
+        $g_first_name  = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_VORNAME', true ) );
+        $g_member_no   = sanitize_text_field( (string) ( get_user_meta( $user_id, 'ausweis_MITGLIEDSNUMMER', true ) ?: get_user_meta( $user_id, 'ausweis_MITGLIEDNR', true ) ) );
+        $g_valid_until = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_GUELTIG_BIS', true ) );
+        $g_last_name   = ( $g_last_name !== '' ) ? $g_last_name : $ph;
+        $g_first_name  = ( $g_first_name !== '' ) ? $g_first_name : $ph;
+        $g_member_no   = ( $g_member_no !== '' ) ? $g_member_no : $ph;
+        $g_valid_until = ( $g_valid_until !== '' ) ? $g_valid_until : $ph;
 
 		$claims = [
 			'iss'     => $serviceAccount['client_email'],
@@ -545,14 +581,9 @@ class MWP_Plugin {
 					[
 						'id'                 => $classId,
 						'issuerName'         => get_bloginfo( 'name' ),
-						'hexBackgroundColor' => '#000000',
-						'logo'               => [ 'sourceUri' => [ 'uri' => get_site_icon_url() ] ],
-						'cardTitle'          => [
-							'defaultValue' => [
-								'language' => 'en-US',
-								'value'    => 'Member Card'
-							]
-						],
+                    'hexBackgroundColor' => '#F6F9FA',
+                    'logo'               => [ 'sourceUri' => [ 'uri' => ( ! empty( $opts['pass_logo_id'] ) ? wp_get_attachment_image_url( (int) $opts['pass_logo_id'], 'full' ) : get_site_icon_url() ) ] ],
+                    'cardTitle'          => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => 'Mitgliedsausweis' ] ],
 					]
 				],
 				'genericObjects' => [
@@ -560,17 +591,21 @@ class MWP_Plugin {
 						'id'              => $objectId,
 						'classId'         => $classId,
 						'state'           => 'ACTIVE',
-						'header'          => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => 'Mitgliedsausweis' ] ],
-						'cardTitle'       => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => 'Mitgliedsausweis' ] ],
-						'subheader'       => [ 'defaultValue' => [ 'language' => 'en-US', 'value' => $member_name ] ],
-						'textModulesData' => [
-							[
-								'header' => 'Member ID',
-								'body'   => $member_id
-							]
-						],
-						'barcode'         => [ 'type' => 'QR_CODE', 'value' => 'MEMBER:' . $member_id ]
-					]
+                    'header'          => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => 'Mitgliedsausweis' ] ],
+                    'cardTitle'       => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => 'Mitgliedsausweis' ] ],
+                    'subheader'       => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => trim( $g_last_name . ( $g_first_name ? ', ' . $g_first_name : '' ) ) ] ],
+                    'textModulesData' => [
+                        [
+                            'header' => 'Mitgliedsnummer',
+                            'body'   => $g_member_no
+                        ],
+                        [
+                            'header' => 'Gültig bis',
+                            'body'   => $g_valid_until
+                        ]
+                    ],
+                    'barcode'         => [ 'type' => 'QR_CODE', 'value' => add_query_arg( [ 'mwp_action' => 'verify', 'mwp_token' => ( class_exists('\\Firebase\\JWT\\JWT') ? JWT::encode( [ 'uid' => $user_id, 'mid' => $member_id, 'iat' => time(), 'exp' => time() + YEAR_IN_SECONDS ], wp_salt('auth'), 'HS256' ) : '' ) ], home_url('/') ) ]
+                ]
 				]
 			]
 		];
