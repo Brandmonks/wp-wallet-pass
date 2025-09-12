@@ -379,14 +379,18 @@ class MWP_Plugin {
 			'passTypeIdentifier' => $opts['pass_type_id'],
 			'teamIdentifier'     => $opts['team_id'],
 			'organizationName'   => $opts['org_name'],
-			'description'        => 'Member Card',
+			'description'        => 'Mitgliedsausweis',
 			'serialNumber'       => $serial,
 			'backgroundColor'    => '#F6F9FA',
 			'foregroundColor'    => '#0D9DDB',
 			'labelColor'         => '#0D9DDB',
 			'generic'            => [
-				'primaryFields'   => [ [ 'key' => 'name', 'label' => 'Name', 'value' => $member_name ] ],
-				'auxiliaryFields' => [ [ 'key' => 'memberId', 'label' => 'Member ID', 'value' => $member_id ] ]
+				'primaryFields'   => [ [ 'key' => 'title', 'label' => '', 'value' => 'MITGLIEDSAUSWEIS' ] ],
+				'secondaryFields' => [ [ 'key' => 'name', 'label' => 'NAME/SURNAME/NOM/APELLIDO', 'value' => $member_name ] ],
+				'auxiliaryFields' => [
+					[ 'key' => 'given', 'label' => 'VORNAMEN/GIVEN NAMES/PRÉNOMS/NOMBRES', 'value' => $member_name ],
+					[ 'key' => 'memberId', 'label' => 'MITGLIEDSNUMMER', 'value' => $member_id ]
+				]
 			],
 			'barcodes'          => [
 				[
@@ -568,7 +572,10 @@ class MWP_Plugin {
 	}
 
 	/**
-	 * Generate a simple background image with thick top/bottom bars.
+	 * Generate a background approximating the provided card design:
+	 * - Light background (#F6F9FA)
+	 * - Top and bottom horizontal gradient bars
+	 * - Left vertical accent line under the logo area
 	 */
 	private function mwp_generate_background_image( int $width, int $height, int $bar_thickness, string $bar_hex, string $bg_hex ): string {
 		if ( ! function_exists( 'imagecreatetruecolor' ) ) {
@@ -578,19 +585,40 @@ class MWP_Plugin {
 		imagealphablending( $img, true );
 		imagesavealpha( $img, true );
 		// Colors
-		$bar = $this->mwp_hex_to_color( $img, $bar_hex );
 		$bg  = $this->mwp_hex_to_color( $img, $bg_hex );
+		$bar_start = '#0A7FB5';
+		$bar_end   = $bar_hex; // '#0D9DDB'
 		// Fill background
 		imagefilledrectangle( $img, 0, 0, $width, $height, $bg );
-		// Top and bottom bars
-		imagefilledrectangle( $img, 0, 0, $width, $bar_thickness, $bar );
-		imagefilledrectangle( $img, 0, $height - $bar_thickness, $width, $height, $bar );
+		// Top and bottom gradient bars
+		$this->mwp_draw_horizontal_gradient( $img, 0, 0, $width, $bar_thickness, $bar_start, $bar_end );
+		$this->mwp_draw_horizontal_gradient( $img, 0, $height - $bar_thickness, $width, $height, $bar_start, $bar_end );
+		// Left vertical accent line under header area
+		$accent = $this->mwp_hex_to_color( $img, $bar_hex );
+		$line_x = (int) round( $width * 0.22 );
+		$line_top = (int) round( $bar_thickness * 4 );
+		$line_bottom = (int) round( $height * 0.48 );
+		imagefilledrectangle( $img, $line_x, $line_top, $line_x + 4, $line_bottom, $accent );
 		$tmp = tempnam( sys_get_temp_dir(), 'mwp_bg_' );
 		$png = $tmp . '.png';
 		@unlink( $tmp );
 		imagepng( $img, $png );
 		imagedestroy( $img );
 		return $png;
+	}
+
+	private function mwp_draw_horizontal_gradient( $img, int $x1, int $y1, int $x2, int $y2, string $hexStart, string $hexEnd ): void {
+		$w = max(1, $x2 - $x1);
+		list($sr,$sg,$sb) = $this->mwp_hex_to_rgb($hexStart);
+		list($er,$eg,$eb) = $this->mwp_hex_to_rgb($hexEnd);
+		for ( $i = 0; $i < $w; $i++ ) {
+			$t = $i / ($w - 1);
+			$r = (int) round( $sr + ($er - $sr) * $t );
+			$g = (int) round( $sg + ($eg - $sg) * $t );
+			$b = (int) round( $sb + ($eb - $sb) * $t );
+			$col = imagecolorallocatealpha( $img, $r, $g, $b, 0 );
+			imageline( $img, $x1 + $i, $y1, $x1 + $i, $y2, $col );
+		}
 	}
 
 	private function mwp_hex_to_color( $img, string $hex ) {
@@ -602,6 +630,14 @@ class MWP_Plugin {
 		$g = hexdec( substr( $hex, 2, 2 ) );
 		$b = hexdec( substr( $hex, 4, 2 ) );
 		return imagecolorallocatealpha( $img, $r, $g, $b, 0 );
+	}
+
+	private function mwp_hex_to_rgb( string $hex ): array {
+		$hex = ltrim( $hex, '#' );
+		if ( strlen( $hex ) === 3 ) {
+			$hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2];
+		}
+		return [ hexdec(substr($hex,0,2)), hexdec(substr($hex,2,2)), hexdec(substr($hex,4,2)) ];
 	}
 }
 

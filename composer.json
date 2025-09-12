@@ -4,7 +4,8 @@
   "type": "wordpress-plugin",
   "require": {
     "pkpass/pkpass": "^2.0.0",
-    "firebase/php-jwt": "^6.10"
+    "firebase/php-jwt": "^6.10",
+    "ext-gd": "*"
   },
   "autoload": {
     "psr-4": {
