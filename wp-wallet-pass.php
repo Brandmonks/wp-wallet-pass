@@ -555,9 +555,11 @@ class MWP_Plugin {
 			wp_die( 'Invalid service account JSON' );
 		}
 
-		$issuerId = trim( $opts['issuer_id'] );
-		$classId  = ! empty( $opts['class_id'] ) ? trim( $opts['class_id'] ) : ( $issuerId . '.member_class' );
-        $objectId = $issuerId . '.user_' . $user_id; // must be globally unique per Google requirements
+        $issuerId = trim( $opts['issuer_id'] );
+        $classId  = ! empty( $opts['class_id'] ) ? trim( $opts['class_id'] ) : ( $issuerId . '.member_class' );
+        // Use a content-hash suffix so updated metadata creates a fresh object
+        $content_hash = substr( md5( json_encode( [ $member_name, $member_id, get_user_meta( $user_id, 'ausweis_NAME', true ), get_user_meta( $user_id, 'ausweis_VORNAME', true ), get_user_meta( $user_id, 'ausweis_MITGLIEDSNUMMER', true ), get_user_meta( $user_id, 'ausweis_MITGLIEDNR', true ), get_user_meta( $user_id, 'ausweis_GUELTIG_BIS', true ) ] ) ), 0, 8 );
+        $objectId = $issuerId . '.user_' . $user_id . '-' . $content_hash;
 
         // Derive data to mirror the on-site card
         $ph            = apply_filters( 'mwp_empty_placeholder', 'not set / available' );
