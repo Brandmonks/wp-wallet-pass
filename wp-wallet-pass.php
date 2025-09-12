@@ -81,6 +81,10 @@ class MWP_Plugin {
 			$this,
 			'field_text'
 		], 'mwp-settings', 'mwp_apple', [ 'key' => 'org_name' ] );
+		add_settings_field( 'pass_logo_id', 'Pass Logo (media)', [
+			$this,
+			'field_media'
+		], 'mwp-settings', 'mwp_apple', [ 'key' => 'pass_logo_id' ] );
 		add_settings_field( 'p12_path', '.p12 Cert Path', [
 			$this,
 			'field_text'
@@ -124,6 +128,7 @@ class MWP_Plugin {
 			'team_id',
 			'pass_type_id',
 			'org_name',
+			'pass_logo_id',
 			'p12_path',
 			'p12_password',
 			'wwdr_pem',
@@ -151,6 +156,37 @@ class MWP_Plugin {
 		$key  = esc_attr( $args['key'] );
 		$val  = isset( $opts[ $key ] ) ? esc_attr( $opts[ $key ] ) : '';
 		echo "<input type='password' name='" . self::OPT_KEY . "[$key]' value='$val' class='regular-text' />";
+	}
+
+	public function field_media( $args ) {
+		$opts = get_option( self::OPT_KEY, [] );
+		$key  = esc_attr( $args['key'] );
+		$val  = isset( $opts[ $key ] ) ? esc_attr( $opts[ $key ] ) : '';
+		$preview = '';
+		if ( $val && ( $url = wp_get_attachment_image_url( (int) $val, 'medium' ) ) ) {
+			$preview = '<img src="' . esc_url( $url ) . '" style="max-width:140px; max-height:70px; display:block; margin-top:8px; border:1px solid #ccd0d4; background:#fff; padding:4px;" />';
+		}
+		wp_enqueue_media();
+		echo "<input type='number' id='mwp_{$key}' name='" . self::OPT_KEY . "[$key]' value='$val' class='small-text' /> ";
+		echo "<button type='button' class='button' id='mwp_select_{$key}'>Select Image</button>";
+		echo $preview;
+		?>
+		<script>
+		(function(){
+			const btn = document.getElementById('mwp_select_<?php echo esc_js($key); ?>');
+			const input = document.getElementById('mwp_<?php echo esc_js($key); ?>');
+			if(!btn || !input) return;
+			btn.addEventListener('click', function(){
+				const frame = wp.media({ title: 'Select Pass Logo', multiple: false, library: { type: 'image' } });
+				frame.on('select', function(){
+					const attachment = frame.state().get('selection').first().toJSON();
+					input.value = attachment.id;
+				});
+				frame.open();
+			});
+		})();
+		</script>
+		<?php
 	}
 
 	public function render_settings_page() {
@@ -345,9 +381,9 @@ class MWP_Plugin {
 			'organizationName'   => $opts['org_name'],
 			'description'        => 'Member Card',
 			'serialNumber'       => $serial,
-			'backgroundColor'    => 'rgb(0,0,0)',
-			'foregroundColor'    => 'rgb(255,255,255)',
-			'labelColor'         => 'rgb(255,255,255)',
+			'backgroundColor'    => '#F6F9FA',
+			'foregroundColor'    => '#0D9DDB',
+			'labelColor'         => '#0D9DDB',
 			'generic'            => [
 				'primaryFields'   => [ [ 'key' => 'name', 'label' => 'Name', 'value' => $member_name ] ],
 				'auxiliaryFields' => [ [ 'key' => 'memberId', 'label' => 'Member ID', 'value' => $member_id ] ]
@@ -374,8 +410,22 @@ class MWP_Plugin {
 			$icon_path = file_exists( $base . 'icon.png' ) ? ( $base . 'icon.png' ) : $this->mwp_placeholder_icon();
 			// Ensure correct filename inside bundle
 			$pkpass->addFile( $icon_path, 'icon.png' );
-			if ( file_exists( $base . 'logo.png' ) ) {
-				$pkpass->addFile( $base . 'logo.png', 'logo.png' );
+
+			// Add logo from settings (media attachment) or optional file in assets
+			$logo_path = '';
+			if ( ! empty( $opts['pass_logo_id'] ) && ( $p = $this->mwp_prepare_logo_path( (int) $opts['pass_logo_id'] ) ) ) {
+				$logo_path = $p;
+			} elseif ( file_exists( $base . 'logo.png' ) ) {
+				$logo_path = $base . 'logo.png';
+			}
+			if ( $logo_path ) {
+				$pkpass->addFile( $logo_path, 'logo.png' );
+			}
+
+			// Add generated background with top/bottom bars
+			$bg = $this->mwp_generate_background_image( 640, 400, 24, '#0D9DDB', '#F6F9FA' );
+			if ( $bg ) {
+				$pkpass->addFile( $bg, 'background.png' );
 			}
 
 			$blob = $pkpass->create();
@@ -481,6 +531,77 @@ class MWP_Plugin {
 		@unlink( $tmp );
 		file_put_contents( $path, base64_decode( $b64 ) );
 		return $path;
+	}
+
+	/**
+	 * Prepare a PNG logo path from a media attachment.
+	 * Converts to PNG in a temp file if needed.
+	 */
+	private function mwp_prepare_logo_path( int $attachment_id ): string {
+		$filepath = get_attached_file( $attachment_id );
+		if ( ! $filepath || ! file_exists( $filepath ) ) {
+			return '';
+		}
+		$ext = strtolower( pathinfo( $filepath, PATHINFO_EXTENSION ) );
+		if ( $ext === 'png' ) {
+			return $filepath;
+		}
+		// Convert to PNG using GD if available
+		if ( ! function_exists( 'imagecreatefromstring' ) ) {
+			return '';
+		}
+		$data = @file_get_contents( $filepath );
+		if ( ! $data ) {
+			return '';
+		}
+		$im = @imagecreatefromstring( $data );
+		if ( ! $im ) {
+			return '';
+		}
+		imagesavealpha( $im, true );
+		$tmp = tempnam( sys_get_temp_dir(), 'mwp_logo_' );
+		$png = $tmp . '.png';
+		@unlink( $tmp );
+		imagepng( $im, $png );
+		imagedestroy( $im );
+		return $png;
+	}
+
+	/**
+	 * Generate a simple background image with thick top/bottom bars.
+	 */
+	private function mwp_generate_background_image( int $width, int $height, int $bar_thickness, string $bar_hex, string $bg_hex ): string {
+		if ( ! function_exists( 'imagecreatetruecolor' ) ) {
+			return '';
+		}
+		$img = imagecreatetruecolor( $width, $height );
+		imagealphablending( $img, true );
+		imagesavealpha( $img, true );
+		// Colors
+		$bar = $this->mwp_hex_to_color( $img, $bar_hex );
+		$bg  = $this->mwp_hex_to_color( $img, $bg_hex );
+		// Fill background
+		imagefilledrectangle( $img, 0, 0, $width, $height, $bg );
+		// Top and bottom bars
+		imagefilledrectangle( $img, 0, 0, $width, $bar_thickness, $bar );
+		imagefilledrectangle( $img, 0, $height - $bar_thickness, $width, $height, $bar );
+		$tmp = tempnam( sys_get_temp_dir(), 'mwp_bg_' );
+		$png = $tmp . '.png';
+		@unlink( $tmp );
+		imagepng( $img, $png );
+		imagedestroy( $img );
+		return $png;
+	}
+
+	private function mwp_hex_to_color( $img, string $hex ) {
+		$hex = ltrim( $hex, '#' );
+		if ( strlen( $hex ) === 3 ) {
+			$hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2];
+		}
+		$r = hexdec( substr( $hex, 0, 2 ) );
+		$g = hexdec( substr( $hex, 2, 2 ) );
+		$b = hexdec( substr( $hex, 4, 2 ) );
+		return imagecolorallocatealpha( $img, $r, $g, $b, 0 );
 	}
 }
 
