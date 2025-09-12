@@ -106,13 +106,6 @@ class MWP_Plugin {
 			$this,
 			'field_media'
 		], 'mwp-settings', 'mwp_apple', [ 'key' => 'pass_logo_id' ] );
-		add_settings_field( 'p12_path', '.p12 Cert Path', [
-			$this,
-			'field_text'
-		], 'mwp-settings', 'mwp_apple', [
-			'key'         => 'p12_path',
-			'placeholder' => WP_CONTENT_DIR . '/uploads/wallet-keys/cert.p12'
-		] );
 		add_settings_field( 'p12_password', '.p12 Password', [
 			$this,
 			'field_password'
@@ -124,13 +117,6 @@ class MWP_Plugin {
 			'key'    => 'wwdr_pem_attachment_id',
 			'accept' => [ 'pem' ],
 			'help'   => 'Upload/select Apple WWDR PEM (optional)'
-		] );
-		add_settings_field( 'wwdr_pem', 'WWDR PEM (optional path)', [
-			$this,
-			'field_text'
-		], 'mwp-settings', 'mwp_apple', [
-			'key'         => 'wwdr_pem',
-			'placeholder' => WP_CONTENT_DIR . '/uploads/wallet-keys/WWDR.pem'
 		] );
 
 		add_settings_section( 'mwp_google', 'Google Wallet', '__return_false', 'mwp-settings' );
@@ -150,13 +136,6 @@ class MWP_Plugin {
 			'accept' => [ 'json' ],
 			'help'   => 'Upload/select your Google service account JSON.'
 		] );
-		add_settings_field( 'sa_json_path', 'Service Account JSON Path', [
-			$this,
-			'field_text'
-		], 'mwp-settings', 'mwp_google', [
-			'key'         => 'sa_json_path',
-			'placeholder' => WP_CONTENT_DIR . '/uploads/wallet-keys/google-sa.json'
-		] );
 	}
 
 	public function sanitize_options( $opts ) {
@@ -167,14 +146,12 @@ class MWP_Plugin {
 			'org_name',
 			'pass_logo_id',
 			'p12_attachment_id',
-			'p12_path',
 			'p12_password',
 			'wwdr_pem_attachment_id',
-			'wwdr_pem',
 			'issuer_id',
 			'class_id',
 			'sa_json_attachment_id',
-			'sa_json_path'
+			
 		];
 		foreach ( $keys as $k ) {
 			$safe[ $k ] = isset( $opts[ $k ] ) ? sanitize_text_field( $opts[ $k ] ) : '';
@@ -269,7 +246,7 @@ class MWP_Plugin {
 		do_settings_sections( 'mwp-settings' );
 		submit_button( 'Save Settings' );
 		echo '</form>';
-		echo '<p><strong>Notes:</strong> Store secrets outside webroot if possible and reference absolute paths. Ensure files are readable by PHP only.</p>';
+		echo '<p><strong>Notes:</strong> Uploaded certificate and JSON files are sensitive. Restrict access to the Media Library and avoid sharing direct URLs. Rotate keys if exposure is suspected.</p>';
 		echo '</div>';
 	}
 
@@ -431,8 +408,8 @@ class MWP_Plugin {
 			}
 		}
 
-		$p12_path  = $this->mwp_resolve_setting_file( $opts, 'p12_attachment_id', 'p12_path' );
-		$wwdr_path = $this->mwp_resolve_setting_file( $opts, 'wwdr_pem_attachment_id', 'wwdr_pem' );
+		$p12_path  = $this->mwp_resolve_setting_file( $opts, 'p12_attachment_id', '' );
+		$wwdr_path = $this->mwp_resolve_setting_file( $opts, 'wwdr_pem_attachment_id', '' );
 		if ( ! $p12_path ) {
 			status_header( 500 );
 			wp_die( 'Apple settings incomplete: missing .p12 certificate' );
@@ -537,7 +514,7 @@ class MWP_Plugin {
 			status_header( 500 );
 			wp_die( 'Google settings incomplete: issuer_id' );
 		}
-		$sa_path = $this->mwp_resolve_setting_file( $opts, 'sa_json_attachment_id', 'sa_json_path' );
+		$sa_path = $this->mwp_resolve_setting_file( $opts, 'sa_json_attachment_id', '' );
 		if ( ! $sa_path ) {
 			status_header( 500 );
 			wp_die( 'Google settings incomplete: service account JSON' );
