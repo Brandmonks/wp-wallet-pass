@@ -28,6 +28,7 @@ class MWP_Plugin {
 		// Settings
 		add_action( 'admin_menu', [ $this, 'add_settings_page' ] );
 		add_action( 'admin_init', [ $this, 'register_settings' ] );
+		add_filter( 'upload_mimes', [ $this, 'allow_mwp_mimes' ], 10, 1 );
 
 		// Public endpoints
 		add_action( 'init', [ $this, 'register_query_vars_and_rewrites' ] );
@@ -39,6 +40,18 @@ class MWP_Plugin {
 		// Flush rewrites on activation/deactivation
 		register_activation_hook( __FILE__, [ __CLASS__, 'activate' ] );
 		register_deactivation_hook( __FILE__, [ __CLASS__, 'deactivate' ] );
+	}
+
+	/**
+	 * Allow admins to upload credential files (.p12, .pem, .json).
+	 */
+	public function allow_mwp_mimes( $mimes ) {
+		if ( current_user_can( 'manage_options' ) ) {
+			$mimes['p12']  = 'application/x-pkcs12';
+			$mimes['pem']  = 'application/x-pem-file';
+			$mimes['json'] = 'application/json';
+		}
+		return $mimes;
 	}
 
 	// === Activation ===
@@ -81,6 +94,14 @@ class MWP_Plugin {
 			$this,
 			'field_text'
 		], 'mwp-settings', 'mwp_apple', [ 'key' => 'org_name' ] );
+		add_settings_field( 'p12_attachment_id', 'Apple Pass Certificate (.p12)', [
+			$this,
+			'field_file'
+		], 'mwp-settings', 'mwp_apple', [
+			'key'    => 'p12_attachment_id',
+			'accept' => [ 'p12' ],
+			'help'   => 'Upload/select your Apple Pass certificate (.p12).'
+		] );
 		add_settings_field( 'pass_logo_id', 'Pass Logo (media)', [
 			$this,
 			'field_media'
@@ -96,6 +117,14 @@ class MWP_Plugin {
 			$this,
 			'field_password'
 		], 'mwp-settings', 'mwp_apple', [ 'key' => 'p12_password' ] );
+		add_settings_field( 'wwdr_pem_attachment_id', 'WWDR Intermediate (PEM, optional)', [
+			$this,
+			'field_file'
+		], 'mwp-settings', 'mwp_apple', [
+			'key'    => 'wwdr_pem_attachment_id',
+			'accept' => [ 'pem' ],
+			'help'   => 'Upload/select Apple WWDR PEM (optional)'
+		] );
 		add_settings_field( 'wwdr_pem', 'WWDR PEM (optional path)', [
 			$this,
 			'field_text'
@@ -113,6 +142,14 @@ class MWP_Plugin {
 			$this,
 			'field_text'
 		], 'mwp-settings', 'mwp_google', [ 'key' => 'class_id' ] );
+		add_settings_field( 'sa_json_attachment_id', 'Service Account JSON', [
+			$this,
+			'field_file'
+		], 'mwp-settings', 'mwp_google', [
+			'key'    => 'sa_json_attachment_id',
+			'accept' => [ 'json' ],
+			'help'   => 'Upload/select your Google service account JSON.'
+		] );
 		add_settings_field( 'sa_json_path', 'Service Account JSON Path', [
 			$this,
 			'field_text'
@@ -129,11 +166,14 @@ class MWP_Plugin {
 			'pass_type_id',
 			'org_name',
 			'pass_logo_id',
+			'p12_attachment_id',
 			'p12_path',
 			'p12_password',
+			'wwdr_pem_attachment_id',
 			'wwdr_pem',
 			'issuer_id',
 			'class_id',
+			'sa_json_attachment_id',
 			'sa_json_path'
 		];
 		foreach ( $keys as $k ) {
@@ -181,6 +221,40 @@ class MWP_Plugin {
 				frame.on('select', function(){
 					const attachment = frame.state().get('selection').first().toJSON();
 					input.value = attachment.id;
+				});
+				frame.open();
+			});
+		})();
+		</script>
+		<?php
+	}
+
+	public function field_file( $args ) {
+		$opts  = get_option( self::OPT_KEY, [] );
+		$key   = esc_attr( $args['key'] );
+		$val   = isset( $opts[ $key ] ) ? esc_attr( $opts[ $key ] ) : '';
+		$help  = isset( $args['help'] ) ? esc_html( $args['help'] ) : '';
+		$label = $val ? basename( (string) wp_get_attachment_url( (int) $val ) ) : 'No file selected';
+		wp_enqueue_media();
+		echo "<input type='number' id='mwp_{$key}' name='" . self::OPT_KEY . "[$key]' value='$val' class='small-text' /> ";
+		echo "<button type='button' class='button' id='mwp_select_{$key}'>Select File</button> ";
+		echo "<span id='mwp_label_{$key}' style='margin-left:8px;opacity:.8;'>" . esc_html( $label ) . "</span>";
+		if ( $help ) {
+			echo '<p class="description">' . $help . '</p>';
+		}
+		?>
+		<script>
+		(function(){
+			const btn = document.getElementById('mwp_select_<?php echo esc_js($key); ?>');
+			const input = document.getElementById('mwp_<?php echo esc_js($key); ?>');
+			const label = document.getElementById('mwp_label_<?php echo esc_js($key); ?>');
+			if(!btn || !input) return;
+			btn.addEventListener('click', function(){
+				const frame = wp.media({ title: 'Select File', multiple: false, library: { type: 'application' } });
+				frame.on('select', function(){
+					const attachment = frame.state().get('selection').first().toJSON();
+					input.value = attachment.id;
+					if(label){ label.textContent = attachment.filename || 'Selected'; }
 				});
 				frame.open();
 			});
@@ -350,11 +424,18 @@ class MWP_Plugin {
 	private function serve_apple_pkpass( string $member_name, string $member_id, int $user_id ) {
 		// Generate and stream a .pkpass for the member
 		$opts = get_option( self::OPT_KEY, [] );
-		foreach ( [ 'team_id', 'pass_type_id', 'org_name', 'p12_path', 'p12_password' ] as $req ) {
+		foreach ( [ 'team_id', 'pass_type_id', 'org_name', 'p12_password' ] as $req ) {
 			if ( empty( $opts[ $req ] ) ) {
 				status_header( 500 );
 				wp_die( 'Apple settings incomplete: ' . $req );
 			}
+		}
+
+		$p12_path  = $this->mwp_resolve_setting_file( $opts, 'p12_attachment_id', 'p12_path' );
+		$wwdr_path = $this->mwp_resolve_setting_file( $opts, 'wwdr_pem_attachment_id', 'wwdr_pem' );
+		if ( ! $p12_path ) {
+			status_header( 500 );
+			wp_die( 'Apple settings incomplete: missing .p12 certificate' );
 		}
 		if ( ! class_exists( 'PKPass\\PKPass' ) ) {
 			status_header( 500 );
@@ -404,9 +485,9 @@ class MWP_Plugin {
 
 
 		try {
-			$pkpass = new PKPass\PKPass( $opts['p12_path'], $opts['p12_password'] );
-			if ( ! empty( $opts['wwdr_pem'] ) ) {
-				$pkpass->setWwdrCertificatePath( $opts['wwdr_pem'] );
+			$pkpass = new PKPass\PKPass( $p12_path, $opts['p12_password'] );
+			if ( $wwdr_path ) {
+				$pkpass->setWwdrCertificatePath( $wwdr_path );
 			}
 			$pkpass->setData( $passJson );
 			// Add required images (fallback to placeholder icon if missing)
@@ -452,18 +533,21 @@ class MWP_Plugin {
 	// === Google Wallet ===
 	private function redirect_google_wallet( string $member_name, string $member_id, int $user_id ) {
 		$opts = get_option( self::OPT_KEY, [] );
-		foreach ( [ 'issuer_id', 'sa_json_path' ] as $req ) {
-			if ( empty( $opts[ $req ] ) ) {
-				status_header( 500 );
-				wp_die( 'Google settings incomplete: ' . $req );
-			}
+		if ( empty( $opts['issuer_id'] ) ) {
+			status_header( 500 );
+			wp_die( 'Google settings incomplete: issuer_id' );
+		}
+		$sa_path = $this->mwp_resolve_setting_file( $opts, 'sa_json_attachment_id', 'sa_json_path' );
+		if ( ! $sa_path ) {
+			status_header( 500 );
+			wp_die( 'Google settings incomplete: service account JSON' );
 		}
 		if ( ! class_exists( 'Firebase\\JWT\\JWT' ) ) {
 			status_header( 500 );
 			wp_die( 'firebase/php-jwt not found. Run composer install.' );
 		}
 
-		$serviceAccount = json_decode( @file_get_contents( $opts['sa_json_path'] ), true );
+		$serviceAccount = json_decode( @file_get_contents( $sa_path ), true );
 		if ( ! $serviceAccount || empty( $serviceAccount['private_key'] ) || empty( $serviceAccount['client_email'] ) ) {
 			status_header( 500 );
 			wp_die( 'Invalid service account JSON' );
@@ -535,6 +619,24 @@ class MWP_Plugin {
 		@unlink( $tmp );
 		file_put_contents( $path, base64_decode( $b64 ) );
 		return $path;
+	}
+
+	/**
+	 * Resolve a file path from settings using either an attachment ID or a plain path fallback.
+	 */
+	private function mwp_resolve_setting_file( array $opts, string $attachment_key, string $path_key ): string {
+		$aid = isset( $opts[ $attachment_key ] ) ? absint( $opts[ $attachment_key ] ) : 0;
+		if ( $aid ) {
+			$path = get_attached_file( $aid );
+			if ( $path && file_exists( $path ) ) {
+				return $path;
+			}
+		}
+		$path = isset( $opts[ $path_key ] ) ? $opts[ $path_key ] : '';
+		if ( $path && file_exists( $path ) ) {
+			return $path;
+		}
+		return '';
 	}
 
 	/**
