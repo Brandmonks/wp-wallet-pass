@@ -437,16 +437,7 @@ class MWP_Plugin {
 
 		$qr_message = apply_filters( 'mwp_barcode_message', $verify_url, $user_id, $member_id );
 
-        // Read user-meta based fields to mirror on-site card, with placeholders
-        $ph          = apply_filters( 'mwp_empty_placeholder', 'not set / available' );
-        $last_name   = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_NAME', true ) );
-        $first_name  = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_VORNAME', true ) );
-        $member_no   = sanitize_text_field( (string) ( get_user_meta( $user_id, 'ausweis_MITGLIEDSNUMMER', true ) ?: get_user_meta( $user_id, 'ausweis_MITGLIEDNR', true ) ) );
-        $valid_until = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_GUELTIG_BIS', true ) );
-        $last_name   = ( $last_name !== '' ) ? $last_name : $ph;
-        $first_name  = ( $first_name !== '' ) ? $first_name : $ph;
-        $member_no   = ( $member_no !== '' ) ? $member_no : $ph;
-        $valid_until = ( $valid_until !== '' ) ? $valid_until : $ph;
+		$member_fields = $this->mwp_member_pass_fields( $user_id );
 
 		$passJson = [
 			'formatVersion'      => 1,
@@ -458,15 +449,17 @@ class MWP_Plugin {
 			'backgroundColor'    => '#F6F9FA',
 			'foregroundColor'    => '#0D9DDB',
 			'labelColor'         => '#0D9DDB',
+			'expirationDate'     => $member_fields['expiration_iso'],
+			'voided'             => $member_fields['expired'],
 			'generic'            => [
 				'primaryFields'   => [ [ 'key' => 'title', 'label' => '', 'value' => 'MITGLIEDSAUSWEIS' ] ],
 				'secondaryFields' => [
-					[ 'key' => 'lastname',  'label' => 'NAME/SURNAME/NOM/APELLIDO',              'value' => $last_name ],
-					[ 'key' => 'firstname', 'label' => 'VORNAMEN/GIVEN NAMES/PRÉNOMS/NOMBRES', 'value' => $first_name ]
+					[ 'key' => 'fullname', 'label' => 'NAME', 'value' => $member_fields['full_name'] ]
 				],
 				'auxiliaryFields' => [
-					[ 'key' => 'memberId',  'label' => 'MITGLIEDSNUMMER', 'value' => $member_no ],
-					[ 'key' => 'validTill', 'label' => 'GÜLTIG BIS',      'value' => $valid_until ]
+					[ 'key' => 'memberId',   'label' => 'MITGLIEDSNUMMER', 'value' => $member_fields['member_no'] ],
+					[ 'key' => 'validTill',  'label' => 'GÜLTIG BIS',      'value' => $member_fields['valid_until'] ],
+					[ 'key' => 'memberType', 'label' => 'MITGLIEDSART',    'value' => $member_fields['member_type'] ]
 				]
 			],
 			'barcodes'          => [
@@ -474,10 +467,13 @@ class MWP_Plugin {
 					'format'          => 'PKBarcodeFormatQR',
 					'message'         => $qr_message,
 					'messageEncoding' => 'iso-8859-1',
-					'altText'         => 'Member ID: ' . $member_id
+					'altText'         => 'Mitgliedsnummer: ' . $member_fields['member_no']
 				]
 			]
 		];
+		if ( empty( $member_fields['expiration_iso'] ) ) {
+			unset( $passJson['expirationDate'] );
+		}
 
 
 		try {
@@ -555,22 +551,12 @@ class MWP_Plugin {
 			wp_die( 'Invalid service account JSON' );
 		}
 
-        $issuerId = trim( $opts['issuer_id'] );
-        $classId  = ! empty( $opts['class_id'] ) ? trim( $opts['class_id'] ) : ( $issuerId . '.member_class' );
-        // Use a content-hash suffix so updated metadata creates a fresh object
-        $content_hash = substr( md5( json_encode( [ $member_name, $member_id, get_user_meta( $user_id, 'ausweis_NAME', true ), get_user_meta( $user_id, 'ausweis_VORNAME', true ), get_user_meta( $user_id, 'ausweis_MITGLIEDSNUMMER', true ), get_user_meta( $user_id, 'ausweis_MITGLIEDNR', true ), get_user_meta( $user_id, 'ausweis_GUELTIG_BIS', true ) ] ) ), 0, 8 );
-        $objectId = $issuerId . '.user_' . $user_id . '-' . $content_hash;
-
-        // Derive data to mirror the on-site card
-        $ph            = apply_filters( 'mwp_empty_placeholder', 'not set / available' );
-        $g_last_name   = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_NAME', true ) );
-        $g_first_name  = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_VORNAME', true ) );
-        $g_member_no   = sanitize_text_field( (string) ( get_user_meta( $user_id, 'ausweis_MITGLIEDSNUMMER', true ) ?: get_user_meta( $user_id, 'ausweis_MITGLIEDNR', true ) ) );
-        $g_valid_until = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_GUELTIG_BIS', true ) );
-        $g_last_name   = ( $g_last_name !== '' ) ? $g_last_name : $ph;
-        $g_first_name  = ( $g_first_name !== '' ) ? $g_first_name : $ph;
-        $g_member_no   = ( $g_member_no !== '' ) ? $g_member_no : $ph;
-        $g_valid_until = ( $g_valid_until !== '' ) ? $g_valid_until : $ph;
+		$issuerId = trim( $opts['issuer_id'] );
+		$classId  = ! empty( $opts['class_id'] ) ? trim( $opts['class_id'] ) : ( $issuerId . '.member_class' );
+		$member_fields = $this->mwp_member_pass_fields( $user_id );
+		// Use a content-hash suffix so updated metadata creates a fresh object
+		$content_hash = substr( md5( wp_json_encode( [ $member_name, $member_id, $member_fields ] ) ), 0, 8 );
+		$objectId = $issuerId . '.user_' . $user_id . '-' . $content_hash;
 
 		$claims = [
 			'iss'     => $serviceAccount['client_email'],
@@ -583,31 +569,35 @@ class MWP_Plugin {
 					[
 						'id'                 => $classId,
 						'issuerName'         => get_bloginfo( 'name' ),
-                    'hexBackgroundColor' => '#F6F9FA',
-                    'logo'               => [ 'sourceUri' => [ 'uri' => ( ! empty( $opts['pass_logo_id'] ) ? wp_get_attachment_image_url( (int) $opts['pass_logo_id'], 'full' ) : get_site_icon_url() ) ] ],
-                    'cardTitle'          => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => 'Mitgliedsausweis' ] ],
+						'hexBackgroundColor' => '#F6F9FA',
+						'logo'               => [ 'sourceUri' => [ 'uri' => ( ! empty( $opts['pass_logo_id'] ) ? wp_get_attachment_image_url( (int) $opts['pass_logo_id'], 'full' ) : get_site_icon_url() ) ] ],
+						'cardTitle'          => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => 'Mitgliedsausweis' ] ],
 					]
 				],
 				'genericObjects' => [
 					[
 						'id'              => $objectId,
 						'classId'         => $classId,
-						'state'           => 'ACTIVE',
-                    'header'          => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => 'Mitgliedsausweis' ] ],
-                    'cardTitle'       => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => 'Mitgliedsausweis' ] ],
-                    'subheader'       => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => trim( $g_last_name . ( $g_first_name ? ', ' . $g_first_name : '' ) ) ] ],
-                    'textModulesData' => [
-                        [
-                            'header' => 'Mitgliedsnummer',
-                            'body'   => $g_member_no
-                        ],
-                        [
-                            'header' => 'Gültig bis',
-                            'body'   => $g_valid_until
-                        ]
-                    ],
-                    'barcode'         => [ 'type' => 'QR_CODE', 'value' => add_query_arg( [ 'mwp_action' => 'verify', 'mwp_token' => ( class_exists('\\Firebase\\JWT\\JWT') ? JWT::encode( [ 'uid' => $user_id, 'mid' => $member_id, 'iat' => time(), 'exp' => time() + YEAR_IN_SECONDS ], wp_salt('auth'), 'HS256' ) : '' ) ], home_url('/') ) ]
-                ]
+						'state'           => ( $member_fields['expired'] ? 'EXPIRED' : 'ACTIVE' ),
+						'header'          => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => 'Mitgliedsausweis' ] ],
+						'cardTitle'       => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => 'Mitgliedsausweis' ] ],
+						'subheader'       => [ 'defaultValue' => [ 'language' => 'de-DE', 'value' => $member_fields['full_name'] ] ],
+						'textModulesData' => [
+							[
+								'header' => 'Mitgliedsnummer',
+								'body'   => $member_fields['member_no']
+							],
+							[
+								'header' => 'Gültig bis',
+								'body'   => $member_fields['valid_until']
+							],
+							[
+								'header' => 'Mitgliedschaft',
+								'body'   => $member_fields['member_type']
+							]
+						],
+						'barcode'         => [ 'type' => 'QR_CODE', 'value' => add_query_arg( [ 'mwp_action' => 'verify', 'mwp_token' => ( class_exists('\\Firebase\\JWT\\JWT') ? JWT::encode( [ 'uid' => $user_id, 'mid' => $member_id, 'iat' => time(), 'exp' => time() + YEAR_IN_SECONDS ], wp_salt('auth'), 'HS256' ) : '' ) ], home_url('/') ) ]
+					]
 				]
 			]
 		];
@@ -621,6 +611,61 @@ class MWP_Plugin {
 			status_header( 500 );
 			wp_die( 'JWT error: ' . $e->getMessage() );
 		}
+	}
+
+	/**
+	 * Collect member-facing field values (names, number, membership type, validity).
+	 */
+	private function mwp_member_pass_fields( int $user_id ): array {
+		$ph = apply_filters( 'mwp_empty_placeholder', 'not set / available' );
+
+		$last_name       = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_NAME', true ) );
+		$first_name      = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_VORNAME', true ) );
+		$member_no       = sanitize_text_field( (string) ( get_user_meta( $user_id, 'ausweis_MITGLIEDSNUMMER', true ) ?: get_user_meta( $user_id, 'ausweis_MITGLIEDNR', true ) ) );
+		$exit_date_raw   = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_AUSTR_DAT', true ) );
+		$member_type_raw = sanitize_text_field( (string) get_user_meta( $user_id, 'ausweis_ART_MITGL', true ) );
+
+		$full_name = trim( preg_replace( '/\s+/', ' ', trim( $first_name . ' ' . $last_name ) ) );
+		$full_name = $full_name !== '' ? $full_name : $ph;
+
+		// Map membership type codes to readable labels
+		$type_map = [
+			'1' => 'Mitglied - Pflicht',
+			'2' => 'Arbeitgeber',
+			'3' => 'Weiterbildungsstätten',
+			'4' => 'Mitglied - Freiwillig',
+			'5' => 'Kammermagazin',
+			'6' => 'Kein Mitglied',
+			'7' => 'Arbeitgeberimport',
+		];
+		$member_type = isset( $type_map[ $member_type_raw ] ) ? $type_map[ $member_type_raw ] : $member_type_raw;
+		$member_type = $member_type !== '' ? $member_type : $ph;
+
+		// If no exit date is present, fall back to the end of the current year (min. 2026 as requested)
+		$now         = current_time( 'timestamp' );
+		$currentYear = (int) date_i18n( 'Y', $now );
+		$base_year   = max( $currentYear, 2026 );
+		$default_exp = sprintf( '31.12.%04d', $base_year );
+		$valid_until = $exit_date_raw !== '' ? $exit_date_raw : $default_exp;
+
+		// Try to parse a timestamp for expiration/voiding
+		$expiry_ts = strtotime( str_replace( '.', '-', $valid_until ) );
+		if ( ! $expiry_ts && $exit_date_raw !== '' ) {
+			$expiry_ts = strtotime( $exit_date_raw );
+		}
+		$expiration_iso = $expiry_ts ? gmdate( 'c', $expiry_ts ) : '';
+		$is_expired     = $expiry_ts ? ( $expiry_ts < $now ) : false;
+
+		return [
+			'first_name'    => $first_name !== '' ? $first_name : $ph,
+			'last_name'     => $last_name !== '' ? $last_name : $ph,
+			'full_name'     => $full_name,
+			'member_no'     => $member_no !== '' ? $member_no : $ph,
+			'valid_until'   => $valid_until !== '' ? $valid_until : $ph,
+			'expiration_iso' => $expiration_iso,
+			'expired'       => $is_expired,
+			'member_type'   => $member_type,
+		];
 	}
 
 	/**
